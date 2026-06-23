@@ -11,6 +11,8 @@ import {
   HeartPulse,
   IndianRupee,
   Languages,
+  Lock,
+  LogOut,
   MapPin,
   MessageSquare,
   PhoneCall,
@@ -24,7 +26,16 @@ import {
   WifiOff,
 } from 'lucide-react';
 import './App.css';
-import { appwriteStatus, createRecord, listRecent, uploadPrescriptionFile } from './lib/appwrite';
+import {
+  appwriteStatus,
+  createRecord,
+  getCurrentUser,
+  listRecent,
+  signInPatient,
+  signOutPatient,
+  signUpPatient,
+  uploadPrescriptionFile,
+} from './lib/appwrite';
 import { careGaps, cities, departments, languages, medicineInventory, reminderPlans } from './lib/demoData';
 
 const initialPatient = {
@@ -124,6 +135,14 @@ function formatMoney(value) {
 
 function App() {
   const [activeView, setActiveView] = useState('overview');
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authMode, setAuthMode] = useState('signin');
+  const [authForm, setAuthForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+  });
   const [patient, setPatient] = useState(initialPatient);
   const [appointment, setAppointment] = useState(initialAppointment);
   const [prescription, setPrescription] = useState(initialPrescription);
@@ -179,7 +198,19 @@ function App() {
     ];
   }, [activePatient, patient.language, records]);
 
-  async function refreshRecords() {
+  async function refreshRecords(user = currentUser) {
+    if (!user) {
+      setRecords({
+        patients: [],
+        appointments: [],
+        prescriptions: [],
+        medicineRequests: [],
+        emergencyAlerts: [],
+        feedback: [],
+      });
+      return;
+    }
+
     const [
       patients,
       appointments,
@@ -188,12 +219,12 @@ function App() {
       emergencyAlerts,
       feedbackRows,
     ] = await Promise.all([
-      listRecent('patients'),
-      listRecent('appointments'),
-      listRecent('prescriptions'),
-      listRecent('medicineRequests'),
-      listRecent('emergencyAlerts'),
-      listRecent('feedback'),
+      listRecent('patients', user),
+      listRecent('appointments', user),
+      listRecent('prescriptions', user),
+      listRecent('medicineRequests', user),
+      listRecent('emergencyAlerts', user),
+      listRecent('feedback', user),
     ]);
 
     setRecords({
@@ -207,11 +238,41 @@ function App() {
   }
 
   useEffect(() => {
-    refreshRecords().catch((error) => {
-      console.warn(error);
-      setToast('Unable to load saved records.');
-    });
+    let mounted = true;
+
+    getCurrentUser()
+      .then((user) => {
+        if (mounted) {
+          setCurrentUser(user);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setCurrentUser(null);
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setAuthLoading(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      refreshRecords(null);
+      return;
+    }
+
+    refreshRecords(currentUser).catch((error) => {
+      console.warn(error);
+      setToast('Unable to load your saved records.');
+    });
+  }, [currentUser]);
 
   useEffect(() => {
     if (!toast) {
@@ -246,6 +307,39 @@ function App() {
     }
   }
 
+  async function handleAuthSubmit(event) {
+    event.preventDefault();
+    setSaving(true);
+
+    try {
+      const authAction = authMode === 'signup' ? signUpPatient : signInPatient;
+      const user = await authAction(authForm);
+      setCurrentUser(user);
+      setToast(authMode === 'signup' ? 'Patient account created.' : 'Logged in securely.');
+    } catch (error) {
+      console.error(error);
+      setToast(error.message || 'Login failed. Check your Appwrite auth settings.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSignOut() {
+    setSaving(true);
+
+    try {
+      await signOutPatient();
+      setCurrentUser(null);
+      setActiveView('overview');
+      setToast('Logged out.');
+    } catch (error) {
+      console.error(error);
+      setToast('Logout failed.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function hydrateFromPatient() {
     const name = patient.name || activePatient.name || '';
     const phone = patient.phone || activePatient.phone || '';
@@ -269,7 +363,7 @@ function App() {
           ...patient,
           age: Number(patient.age || 0),
           priority: carePriority.level,
-        }),
+        }, currentUser),
       'Patient wallet saved.',
     );
     hydrateFromPatient();
@@ -287,7 +381,7 @@ function App() {
           token: makeToken(appointment.department),
           status: 'Booked',
           priority: priority.level,
-        }),
+        }, currentUser),
       'Care token booked.',
     );
   }
@@ -295,14 +389,14 @@ function App() {
   async function handlePrescriptionSubmit(event) {
     event.preventDefault();
     await saveWithToast(async () => {
-      const uploadedFile = await uploadPrescriptionFile(prescriptionFile);
+      const uploadedFile = await uploadPrescriptionFile(prescriptionFile, currentUser);
       await createRecord('prescriptions', {
         ...prescription,
         patientName: prescription.patientName || patient.name,
         phone: prescription.phone || patient.phone,
         fileName: prescriptionFile?.name || '',
         fileId: uploadedFile?.$id || '',
-      });
+      }, currentUser);
       setPrescriptionFile(null);
     }, 'Medical locker updated.');
   }
@@ -322,7 +416,7 @@ function App() {
               stock: item.stock,
             })),
           ),
-        }),
+        }, currentUser),
       'Medicine request saved.',
     );
   }
@@ -336,7 +430,7 @@ function App() {
           patientName: emergency.patientName || patient.name,
           phone: emergency.phone || patient.phone,
           status: 'Ready for care desk',
-        }),
+        }, currentUser),
       'SOS profile saved.',
     );
   }
@@ -348,8 +442,42 @@ function App() {
         createRecord('feedback', {
           ...feedback,
           rating: Number(feedback.rating),
-        }),
+        }, currentUser),
       'Feedback captured.',
+    );
+  }
+
+  if (authLoading) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card">
+          <div className="brand auth-brand">
+            <div className="brand-mark">
+              <HeartPulse size={24} />
+            </div>
+            <div>
+              <h1>CareBridge</h1>
+              <span>Loading secure patient portal</span>
+            </div>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <>
+        <AuthGate
+          authForm={authForm}
+          authMode={authMode}
+          onChange={patchState(setAuthForm)}
+          onModeChange={setAuthMode}
+          onSubmit={handleAuthSubmit}
+          saving={saving}
+        />
+        {toast && <div className="toast">{toast}</div>}
+      </>
     );
   }
 
@@ -388,7 +516,15 @@ function App() {
           {appwriteStatus.configured ? <Cloud size={18} /> : <WifiOff size={18} />}
           <div>
             <strong>{appwriteStatus.configured ? 'Appwrite live' : 'Demo storage'}</strong>
-            <span>{appwriteStatus.configured ? 'Database connected' : 'Local browser data'}</span>
+            <span>{appwriteStatus.configured ? 'Private patient rows' : 'Local private demo'}</span>
+          </div>
+        </div>
+
+        <div className="authority-card">
+          <Lock size={18} />
+          <div>
+            <strong>{currentUser.name || 'Patient account'}</strong>
+            <span>{currentUser.email || 'Signed in locally'}</span>
           </div>
         </div>
       </aside>
@@ -396,8 +532,8 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Patient experience console</p>
-            <h2>Healthcare access, records, tokens, medicines, and trust in one flow.</h2>
+            <p className="eyebrow">Private patient portal</p>
+            <h2>Your records, appointments, prescriptions, medicines, and care alerts.</h2>
           </div>
           <div className="top-actions">
             <button type="button" className="icon-button" title="Use latest patient" onClick={hydrateFromPatient}>
@@ -406,6 +542,9 @@ function App() {
             <button type="button" className="primary-button" onClick={() => setActiveView('patient')}>
               <ShieldCheck size={18} />
               New wallet
+            </button>
+            <button type="button" className="icon-button" title="Log out" onClick={handleSignOut} disabled={saving}>
+              <LogOut size={18} />
             </button>
           </div>
         </header>
@@ -475,6 +614,23 @@ function App() {
                     <b>{plan.cadence}</b>
                   </div>
                 ))}
+              </div>
+            </Panel>
+
+            <Panel title="Authority Model" icon={Lock} wide>
+              <div className="authority-grid">
+                <div className="authority-item">
+                  <strong>Patient</strong>
+                  <span>Can create and read only their own wallet, tokens, locker, medicine requests, SOS profile, and feedback.</span>
+                </div>
+                <div className="authority-item">
+                  <strong>Doctor or staff</strong>
+                  <span>Should use a separate staff portal with Appwrite Teams or backend-approved access.</span>
+                </div>
+                <div className="authority-item">
+                  <strong>Admin</strong>
+                  <span>Should see reports through a server API, not by giving every browser access to all medical rows.</span>
+                </div>
               </div>
             </Panel>
           </section>
@@ -730,6 +886,92 @@ function App() {
       </section>
 
       {toast && <div className="toast">{toast}</div>}
+    </main>
+  );
+}
+
+function AuthGate({ authForm, authMode, onChange, onModeChange, onSubmit, saving }) {
+  const isSignup = authMode === 'signup';
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-layout">
+        <div className="auth-copy">
+          <div className="brand auth-brand">
+            <div className="brand-mark">
+              <HeartPulse size={24} />
+            </div>
+            <div>
+              <h1>CareBridge</h1>
+              <span>Medicos India</span>
+            </div>
+          </div>
+          <p className="eyebrow">Secure patient access</p>
+          <h2>Patients see only their own medical records after login.</h2>
+          <div className="auth-points">
+            <div>
+              <Lock size={18} />
+              <span>Rows and files are created with user-only permissions.</span>
+            </div>
+            <div>
+              <ShieldCheck size={18} />
+              <span>Appointments, prescriptions, SOS, and feedback stay under one account.</span>
+            </div>
+            <div>
+              <Users size={18} />
+              <span>Staff/admin access should be separated through teams or backend approval.</span>
+            </div>
+          </div>
+        </div>
+
+        <form className="auth-card" onSubmit={onSubmit}>
+          <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
+            <button
+              className={authMode === 'signin' ? 'auth-tab active' : 'auth-tab'}
+              type="button"
+              onClick={() => onModeChange('signin')}
+            >
+              Login
+            </button>
+            <button
+              className={authMode === 'signup' ? 'auth-tab active' : 'auth-tab'}
+              type="button"
+              onClick={() => onModeChange('signup')}
+            >
+              Create account
+            </button>
+          </div>
+
+          {isSignup && (
+            <label className="field">
+              <span>Patient name</span>
+              <input name="name" value={authForm.name} onChange={onChange} required />
+            </label>
+          )}
+
+          <label className="field">
+            <span>Email</span>
+            <input name="email" type="email" value={authForm.email} onChange={onChange} required />
+          </label>
+
+          <label className="field">
+            <span>Password</span>
+            <input
+              name="password"
+              type="password"
+              value={authForm.password}
+              minLength="8"
+              onChange={onChange}
+              required
+            />
+          </label>
+
+          <button className="primary-button full" type="submit" disabled={saving}>
+            <Lock size={18} />
+            {isSignup ? 'Create patient account' : 'Login to patient portal'}
+          </button>
+        </form>
+      </section>
     </main>
   );
 }

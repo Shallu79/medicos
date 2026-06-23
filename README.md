@@ -2,6 +2,18 @@
 
 CareBridge Medicos is a patient-facing healthcare workflow demo for India: patient wallet, appointment token booking, medical locker, medicine availability, SOS profile, care reminders, and feedback. The app writes to Appwrite Databases when configured, and uses local browser storage only as a development fallback.
 
+## Who Uses This App
+
+This version is a private patient portal.
+
+| User | Access |
+| --- | --- |
+| Patient/customer | Can create and read only their own patient wallet, appointments, prescriptions, medicine requests, SOS profile, and feedback. |
+| Doctor/staff | Should use a separate staff portal with Appwrite Teams or a backend API. Do not give staff views through the patient browser app. |
+| Admin/owner | Should use server-side reporting or Appwrite Functions so the browser never receives every patient's medical data. |
+
+Every record created by the app stores `ownerId` and `ownerRole`, and Appwrite documents/files are created with permissions for only the logged-in user.
+
 ## Run locally
 
 ```bash
@@ -16,8 +28,9 @@ Open `http://localhost:5173`.
 
 1. Create an Appwrite project.
 2. Add a Web platform for `localhost` while developing.
-3. Create a database, for example `medicos`.
-4. Create these collections in that database. Some Appwrite console versions call this layer tables; the IDs below match `.env.example`.
+3. Enable Auth provider: `Auth -> Settings -> Email/Password`.
+4. Create a database, for example `medicos`.
+5. Create these collections in that database. Some Appwrite console versions call this layer tables; the IDs below match `.env.example`.
 
 | Collection ID | Purpose |
 | --- | --- |
@@ -28,9 +41,13 @@ Open `http://localhost:5173`.
 | `emergency_alerts` | SOS-ready patient profile |
 | `feedback` | Trust and feedback capture |
 
-5. Add permissions for development: allow authenticated users to create and read rows. The app creates an anonymous Appwrite session before saving. For production, replace anonymous access with phone/email OTP auth and document-level permissions.
-6. Create a Storage bucket with ID `prescriptions`. Allow authenticated users to create and read files during development.
-7. Copy the Appwrite endpoint, project ID, database ID, collection IDs, and bucket ID into `.env`.
+6. For every table, add the columns listed below.
+7. For every table, enable row/document security if the console shows that option.
+8. For every table's permissions, allow authenticated users to `Create` only at the table level. Do not allow table-level `Read` for all users.
+9. Create a Storage bucket with ID `prescriptions`. Allow authenticated users to `Create` files at the bucket level. Files are created with user-only read/update permissions.
+10. Copy the Appwrite endpoint, project ID, database ID, collection IDs, and bucket ID into `.env`.
+
+If you already created the tables from the earlier demo setup, add `ownerId` and `ownerRole` to every table now, then remove broad table-level read permissions.
 
 ### Collection attributes
 
@@ -52,6 +69,8 @@ Use Appwrite string columns unless a different type is shown.
 | `chronicConditions` | string | 1000 |
 | `consent` | boolean | - |
 | `priority` | string | 30 |
+| `ownerId` | string | 80 |
+| `ownerRole` | string | 30 |
 | `createdAt` | string | 60 |
 
 #### `appointments`
@@ -67,6 +86,8 @@ Use Appwrite string columns unless a different type is shown.
 | `token` | string | 30 |
 | `status` | string | 50 |
 | `priority` | string | 30 |
+| `ownerId` | string | 80 |
+| `ownerRole` | string | 30 |
 | `createdAt` | string | 60 |
 
 #### `prescriptions`
@@ -80,6 +101,8 @@ Use Appwrite string columns unless a different type is shown.
 | `notes` | string | 2000 |
 | `fileName` | string | 200 |
 | `fileId` | string | 80 |
+| `ownerId` | string | 80 |
+| `ownerRole` | string | 30 |
 | `createdAt` | string | 60 |
 
 #### `medicine_requests`
@@ -91,6 +114,8 @@ Use Appwrite string columns unless a different type is shown.
 | `urgency` | string | 40 |
 | `genericAccepted` | boolean | - |
 | `matches` | string | 3000 |
+| `ownerId` | string | 80 |
+| `ownerRole` | string | 30 |
 | `createdAt` | string | 60 |
 
 #### `emergency_alerts`
@@ -103,6 +128,8 @@ Use Appwrite string columns unless a different type is shown.
 | `location` | string | 300 |
 | `note` | string | 1000 |
 | `status` | string | 80 |
+| `ownerId` | string | 80 |
+| `ownerRole` | string | 30 |
 | `createdAt` | string | 60 |
 
 #### `feedback`
@@ -113,7 +140,17 @@ Use Appwrite string columns unless a different type is shown.
 | `rating` | integer | - |
 | `category` | string | 80 |
 | `comment` | string | 1200 |
+| `ownerId` | string | 80 |
+| `ownerRole` | string | 30 |
 | `createdAt` | string | 60 |
+
+### Recommended indexes
+
+Create an index on `ownerId` for each table so patient-only queries stay fast.
+
+| Table | Index key |
+| --- | --- |
+| all tables | `ownerId` |
 
 ## MongoDB sync setup
 

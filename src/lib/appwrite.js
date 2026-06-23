@@ -1,4 +1,4 @@
-import { Account, Client, Databases, ID, Query, Storage } from 'appwrite';
+import { Account, Client, Databases, ID, Permission, Query, Role, Storage } from 'appwrite';
 import { syncToMongo } from './mongoSync';
 
 const config = {
@@ -42,6 +42,7 @@ const account = new Account(client);
 const databases = new Databases(client);
 const storage = new Storage(client);
 const localPrefix = 'carebridge-medicos';
+const localUserKey = `${localPrefix}.currentUser`;
 
 export const appwriteStatus = {
   configured: Boolean(config.endpoint && config.projectId && config.databaseId),
@@ -50,16 +51,56 @@ export const appwriteStatus = {
   databaseId: config.databaseId,
 };
 
-async function ensureSession() {
+export async function getCurrentUser() {
   if (!appwriteStatus.configured) {
-    return null;
+    const raw = localStorage.getItem(localUserKey);
+    return raw ? JSON.parse(raw) : null;
   }
 
-  try {
-    return await account.get();
-  } catch (error) {
-    return account.createAnonymousSession();
+  return account.get();
+}
+
+export async function signUpPatient({ name, email, password }) {
+  if (!appwriteStatus.configured) {
+    const localUser = {
+      $id: `local-user-${email.toLowerCase()}`,
+      name,
+      email,
+      prefs: { role: 'patient' },
+    };
+    localStorage.setItem(localUserKey, JSON.stringify(localUser));
+    return localUser;
   }
+
+  await account.create(ID.unique(), email, password, name);
+  await account.createEmailPasswordSession(email, password);
+  await account.updatePrefs({ role: 'patient' });
+  return account.get();
+}
+
+export async function signInPatient({ email, password }) {
+  if (!appwriteStatus.configured) {
+    const localUser = {
+      $id: `local-user-${email.toLowerCase()}`,
+      name: email.split('@')[0],
+      email,
+      prefs: { role: 'patient' },
+    };
+    localStorage.setItem(localUserKey, JSON.stringify(localUser));
+    return localUser;
+  }
+
+  await account.createEmailPasswordSession(email, password);
+  return account.get();
+}
+
+export async function signOutPatient() {
+  if (!appwriteStatus.configured) {
+    localStorage.removeItem(localUserKey);
+    return;
+  }
+
+  await account.deleteSession('current');
 }
 
 function getLocalRows(tableName) {
@@ -95,19 +136,29 @@ function sanitizeData(data) {
   );
 }
 
-export async function createRecord(tableName, data) {
+function getPrivatePermissions(userId) {
+  return [Permission.read(Role.user(userId)), Permission.update(Role.user(userId))];
+}
+
+export async function createRecord(tableName, data, currentUser) {
+  if (!currentUser?.$id) {
+    throw new Error('Please log in before saving medical records.');
+  }
+
   const rowData = sanitizeData({
     ...data,
+    ownerId: currentUser.$id,
+    ownerRole: currentUser.prefs?.role || 'patient',
     createdAt: new Date().toISOString(),
   });
 
   if (appwriteStatus.configured && config.collections[tableName]) {
-    await ensureSession();
     const row = await databases.createDocument(
       config.databaseId,
       config.collections[tableName],
       ID.unique(),
       rowData,
+      getPrivatePermissions(currentUser.$id),
     );
     await syncToMongo(`${tableName}.created`, row);
     return normalizeRow(row);
@@ -120,10 +171,14 @@ export async function createRecord(tableName, data) {
   return localRow;
 }
 
-export async function listRecent(tableName, limit = 12) {
+export async function listRecent(tableName, currentUser, limit = 12) {
+  if (!currentUser?.$id) {
+    return [];
+  }
+
   if (appwriteStatus.configured && config.collections[tableName]) {
-    await ensureSession();
     const response = await databases.listDocuments(config.databaseId, config.collections[tableName], [
+      Query.equal('ownerId', currentUser.$id),
       Query.orderDesc('$createdAt'),
       Query.limit(limit),
     ]);
@@ -131,19 +186,23 @@ export async function listRecent(tableName, limit = 12) {
   }
 
   return getLocalRows(tableName)
+    .filter((row) => row.ownerId === currentUser.$id)
     .sort((a, b) => new Date(b.$createdAt) - new Date(a.$createdAt))
     .slice(0, limit)
     .map(normalizeRow);
 }
 
-export async function uploadPrescriptionFile(file) {
+export async function uploadPrescriptionFile(file, currentUser) {
   if (!file) {
     return null;
   }
 
+  if (!currentUser?.$id) {
+    throw new Error('Please log in before uploading prescription files.');
+  }
+
   if (appwriteStatus.configured && config.bucketId) {
-    await ensureSession();
-    return storage.createFile(config.bucketId, ID.unique(), file);
+    return storage.createFile(config.bucketId, ID.unique(), file, getPrivatePermissions(currentUser.$id));
   }
 
   return {
