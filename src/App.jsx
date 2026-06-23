@@ -30,6 +30,8 @@ import {
   appwriteStatus,
   createRecord,
   getCurrentUser,
+  getUserRole,
+  isCareWorker,
   listRecent,
   signInPatient,
   signOutPatient,
@@ -133,6 +135,14 @@ function formatMoney(value) {
   }).format(value);
 }
 
+function getHelpfulError(error) {
+  if (error?.message === 'Failed to fetch') {
+    return `Failed to reach Appwrite. Add "${window.location.hostname}" in Appwrite Project -> Platforms, then restart the app.`;
+  }
+
+  return error?.message || 'Something went wrong.';
+}
+
 function App() {
   const [activeView, setActiveView] = useState('overview');
   const [currentUser, setCurrentUser] = useState(null);
@@ -171,6 +181,8 @@ function App() {
   const [toast, setToast] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const userRole = useMemo(() => getUserRole(currentUser), [currentUser]);
+  const canManageAll = useMemo(() => isCareWorker(currentUser), [currentUser]);
   const carePriority = useMemo(() => getCarePriority(patient.symptoms), [patient.symptoms]);
   const latestPatient = records.patients[0];
   const activePatient = latestPatient || patient;
@@ -190,13 +202,22 @@ function App() {
     const emergencyReady = records.emergencyAlerts.length > 0;
     const language = activePatient.language || patient.language;
 
+    if (canManageAll) {
+      return [
+        `${records.patients.length} patient wallet record${records.patients.length === 1 ? '' : 's'} visible to your care team role.`,
+        `${appointmentCount} token request${appointmentCount === 1 ? '' : 's'} available for queue management.`,
+        hasLocker ? 'Prescription locker history is available for clinical review.' : 'No prescription locker records yet.',
+        emergencyReady ? 'SOS profiles are ready for staff desk review.' : 'No SOS profile records yet.',
+      ];
+    }
+
     return [
       `${activePatient.name || 'New patient'} prefers ${language}.`,
       appointmentCount ? `${appointmentCount} token request stored.` : 'No token request yet.',
       hasLocker ? 'Medical locker has prescription history.' : 'Medical locker needs first upload.',
       emergencyReady ? 'SOS profile is available for desk review.' : 'SOS profile is not ready.',
     ];
-  }, [activePatient, patient.language, records]);
+  }, [activePatient, canManageAll, patient.language, records]);
 
   async function refreshRecords(user = currentUser) {
     if (!user) {
@@ -270,7 +291,7 @@ function App() {
 
     refreshRecords(currentUser).catch((error) => {
       console.warn(error);
-      setToast('Unable to load your saved records.');
+      setToast(getHelpfulError(error));
     });
   }, [currentUser]);
 
@@ -301,7 +322,7 @@ function App() {
       setToast(message);
     } catch (error) {
       console.error(error);
-      setToast(error.message || 'Save failed. Check your Appwrite permissions.');
+      setToast(getHelpfulError(error));
     } finally {
       setSaving(false);
     }
@@ -315,10 +336,14 @@ function App() {
       const authAction = authMode === 'signup' ? signUpPatient : signInPatient;
       const user = await authAction(authForm);
       setCurrentUser(user);
-      setToast(authMode === 'signup' ? 'Patient account created.' : 'Logged in securely.');
+      setToast(
+        authMode === 'signup'
+          ? 'Patient account created.'
+          : `${isCareWorker(user) ? 'Care team' : 'Patient'} login successful.`,
+      );
     } catch (error) {
       console.error(error);
-      setToast(error.message || 'Login failed. Check your Appwrite auth settings.');
+      setToast(getHelpfulError(error));
     } finally {
       setSaving(false);
     }
@@ -516,15 +541,21 @@ function App() {
           {appwriteStatus.configured ? <Cloud size={18} /> : <WifiOff size={18} />}
           <div>
             <strong>{appwriteStatus.configured ? 'Appwrite live' : 'Demo storage'}</strong>
-            <span>{appwriteStatus.configured ? 'Private patient rows' : 'Local private demo'}</span>
+            <span>
+              {appwriteStatus.configured
+                ? canManageAll
+                  ? 'Care team access'
+                  : 'Private patient rows'
+                : 'Local private demo'}
+            </span>
           </div>
         </div>
 
         <div className="authority-card">
-          <Lock size={18} />
+          {canManageAll ? <ShieldCheck size={18} /> : <Lock size={18} />}
           <div>
             <strong>{currentUser.name || 'Patient account'}</strong>
-            <span>{currentUser.email || 'Signed in locally'}</span>
+            <span>{userRole === 'admin' ? 'Admin' : canManageAll ? 'Medical worker' : 'Patient'} | {currentUser.email || 'Signed in locally'}</span>
           </div>
         </div>
       </aside>
@@ -532,8 +563,12 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Private patient portal</p>
-            <h2>Your records, appointments, prescriptions, medicines, and care alerts.</h2>
+            <p className="eyebrow">{canManageAll ? 'Care team workspace' : 'Private patient portal'}</p>
+            <h2>
+              {canManageAll
+                ? 'Manage all patient records, tokens, prescriptions, and care alerts.'
+                : 'Your records, appointments, prescriptions, medicines, and care alerts.'}
+            </h2>
           </div>
           <div className="top-actions">
             <button type="button" className="icon-button" title="Use latest patient" onClick={hydrateFromPatient}>
@@ -541,7 +576,7 @@ function App() {
             </button>
             <button type="button" className="primary-button" onClick={() => setActiveView('patient')}>
               <ShieldCheck size={18} />
-              New wallet
+              {canManageAll ? 'New patient' : 'New wallet'}
             </button>
             <button type="button" className="icon-button" title="Log out" onClick={handleSignOut} disabled={saving}>
               <LogOut size={18} />
@@ -550,8 +585,8 @@ function App() {
         </header>
 
         <section className="metric-grid" aria-label="Care metrics">
-          <Metric label="Saved patients" value={records.patients.length} icon={Users} tone="teal" />
-          <Metric label="Open tokens" value={records.appointments.length} icon={CalendarClock} tone="blue" />
+          <Metric label={canManageAll ? 'Patient records' : 'Saved patients'} value={records.patients.length} icon={Users} tone="teal" />
+          <Metric label={canManageAll ? 'Queue tokens' : 'Open tokens'} value={records.appointments.length} icon={CalendarClock} tone="blue" />
           <Metric label="Locker files" value={records.prescriptions.length} icon={FileText} tone="amber" />
           <Metric label="SOS profiles" value={records.emergencyAlerts.length} icon={PhoneCall} tone="rose" />
         </section>
@@ -621,15 +656,15 @@ function App() {
               <div className="authority-grid">
                 <div className="authority-item">
                   <strong>Patient</strong>
-                  <span>Can create and read only their own wallet, tokens, locker, medicine requests, SOS profile, and feedback.</span>
+                  <span>Creates an account from this screen and sees only records where they are the owner.</span>
                 </div>
                 <div className="authority-item">
                   <strong>Doctor or staff</strong>
-                  <span>Should use a separate staff portal with Appwrite Teams or backend-approved access.</span>
+                  <span>Logs in with an Appwrite account labeled staff and can manage all patient records.</span>
                 </div>
                 <div className="authority-item">
                   <strong>Admin</strong>
-                  <span>Should see reports through a server API, not by giving every browser access to all medical rows.</span>
+                  <span>Logs in with an Appwrite account labeled admin and can manage all records and reports.</span>
                 </div>
               </div>
             </Panel>
@@ -906,20 +941,20 @@ function AuthGate({ authForm, authMode, onChange, onModeChange, onSubmit, saving
               <span>Medicos India</span>
             </div>
           </div>
-          <p className="eyebrow">Secure patient access</p>
-          <h2>Patients see only their own medical records after login.</h2>
+          <p className="eyebrow">Secure healthcare access</p>
+          <h2>Patients get privacy. Care teams get the full clinical view.</h2>
           <div className="auth-points">
             <div>
               <Lock size={18} />
-              <span>Rows and files are created with user-only permissions.</span>
+              <span>Patients see only records they own after login.</span>
             </div>
             <div>
               <ShieldCheck size={18} />
-              <span>Appointments, prescriptions, SOS, and feedback stay under one account.</span>
+              <span>Medical workers with Appwrite label staff can manage all patient records.</span>
             </div>
             <div>
               <Users size={18} />
-              <span>Staff/admin access should be separated through teams or backend approval.</span>
+              <span>Admins with label admin can see every record for operations and reporting.</span>
             </div>
           </div>
         </div>
@@ -938,7 +973,7 @@ function AuthGate({ authForm, authMode, onChange, onModeChange, onSubmit, saving
               type="button"
               onClick={() => onModeChange('signup')}
             >
-              Create account
+              Create patient
             </button>
           </div>
 
@@ -968,8 +1003,14 @@ function AuthGate({ authForm, authMode, onChange, onModeChange, onSubmit, saving
 
           <button className="primary-button full" type="submit" disabled={saving}>
             <Lock size={18} />
-            {isSignup ? 'Create patient account' : 'Login to patient portal'}
+            {isSignup ? 'Create patient account' : 'Login as patient or staff'}
           </button>
+
+          {!isSignup && (
+            <p className="auth-hint">
+              Staff and admin access is issued by the clinic owner.
+            </p>
+          )}
         </form>
       </section>
     </main>

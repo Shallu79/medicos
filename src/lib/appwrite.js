@@ -51,6 +51,24 @@ export const appwriteStatus = {
   databaseId: config.databaseId,
 };
 
+export function getUserRole(user) {
+  const labels = user?.labels || [];
+
+  if (labels.includes('admin')) {
+    return 'admin';
+  }
+
+  if (labels.includes('staff')) {
+    return 'staff';
+  }
+
+  return 'patient';
+}
+
+export function isCareWorker(user) {
+  return ['staff', 'admin'].includes(getUserRole(user));
+}
+
 export async function getCurrentUser() {
   if (!appwriteStatus.configured) {
     const raw = localStorage.getItem(localUserKey);
@@ -80,10 +98,16 @@ export async function signUpPatient({ name, email, password }) {
 
 export async function signInPatient({ email, password }) {
   if (!appwriteStatus.configured) {
+    const localLabels = email.toLowerCase().includes('staff')
+      ? ['staff']
+      : email.toLowerCase().includes('admin')
+        ? ['admin']
+        : [];
     const localUser = {
       $id: `local-user-${email.toLowerCase()}`,
       name: email.split('@')[0],
       email,
+      labels: localLabels,
       prefs: { role: 'patient' },
     };
     localStorage.setItem(localUserKey, JSON.stringify(localUser));
@@ -137,7 +161,14 @@ function sanitizeData(data) {
 }
 
 function getPrivatePermissions(userId) {
-  return [Permission.read(Role.user(userId)), Permission.update(Role.user(userId))];
+  return [
+    Permission.read(Role.user(userId)),
+    Permission.update(Role.user(userId)),
+    Permission.read(Role.label('staff')),
+    Permission.update(Role.label('staff')),
+    Permission.read(Role.label('admin')),
+    Permission.update(Role.label('admin')),
+  ];
 }
 
 export async function createRecord(tableName, data, currentUser) {
@@ -148,7 +179,7 @@ export async function createRecord(tableName, data, currentUser) {
   const rowData = sanitizeData({
     ...data,
     ownerId: currentUser.$id,
-    ownerRole: currentUser.prefs?.role || 'patient',
+    ownerRole: getUserRole(currentUser),
     createdAt: new Date().toISOString(),
   });
 
@@ -177,16 +208,25 @@ export async function listRecent(tableName, currentUser, limit = 12) {
   }
 
   if (appwriteStatus.configured && config.collections[tableName]) {
-    const response = await databases.listDocuments(config.databaseId, config.collections[tableName], [
-      Query.equal('ownerId', currentUser.$id),
-      Query.orderDesc('$createdAt'),
-      Query.limit(limit),
-    ]);
+    const queries = [Query.orderDesc('$createdAt'), Query.limit(limit)];
+
+    if (!isCareWorker(currentUser)) {
+      queries.unshift(Query.equal('ownerId', currentUser.$id));
+    }
+
+    const response = await databases.listDocuments(
+      config.databaseId,
+      config.collections[tableName],
+      queries,
+    );
     return (response.documents || []).map(normalizeRow);
   }
 
-  return getLocalRows(tableName)
-    .filter((row) => row.ownerId === currentUser.$id)
+  const rows = isCareWorker(currentUser)
+    ? getLocalRows(tableName)
+    : getLocalRows(tableName).filter((row) => row.ownerId === currentUser.$id);
+
+  return rows
     .sort((a, b) => new Date(b.$createdAt) - new Date(a.$createdAt))
     .slice(0, limit)
     .map(normalizeRow);

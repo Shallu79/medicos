@@ -748,6 +748,13 @@ button {
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
 }
 
+.auth-hint {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.62;

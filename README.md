@@ -4,15 +4,15 @@ CareBridge Medicos is a patient-facing healthcare workflow demo for India: patie
 
 ## Who Uses This App
 
-This version is a private patient portal.
+This version supports two secure user types.
 
 | User | Access |
 | --- | --- |
 | Patient/customer | Can create and read only their own patient wallet, appointments, prescriptions, medicine requests, SOS profile, and feedback. |
-| Doctor/staff | Should use a separate staff portal with Appwrite Teams or a backend API. Do not give staff views through the patient browser app. |
-| Admin/owner | Should use server-side reporting or Appwrite Functions so the browser never receives every patient's medical data. |
+| Doctor/staff/medical worker | Can read and update all patient records when their Appwrite user has the `staff` label. |
+| Admin/owner | Can read and update all records when their Appwrite user has the `admin` label. |
 
-Every record created by the app stores `ownerId` and `ownerRole`, and Appwrite documents/files are created with permissions for only the logged-in user.
+Every record created by the app stores `ownerId` and `ownerRole`. Appwrite documents/files are created with permissions for the owner plus Appwrite users labeled `staff` or `admin`.
 
 ## Run locally
 
@@ -27,7 +27,10 @@ Open `http://localhost:5173`.
 ## Appwrite manual setup
 
 1. Create an Appwrite project.
-2. Add a Web platform for `localhost` while developing.
+2. Add Web platforms for every hostname you use while developing.
+   - `localhost`
+   - `127.0.0.1`
+   - your LAN IP if you open the app from another URL, for example `192.168.1.106`
 3. Enable Auth provider: `Auth -> Settings -> Email/Password`.
 4. Create a database, for example `medicos`.
 5. Create these collections in that database. Some Appwrite console versions call this layer tables; the IDs below match `.env.example`.
@@ -44,10 +47,37 @@ Open `http://localhost:5173`.
 6. For every table, add the columns listed below.
 7. For every table, enable row/document security if the console shows that option.
 8. For every table's permissions, allow authenticated users to `Create` only at the table level. Do not allow table-level `Read` for all users.
-9. Create a Storage bucket with ID `prescriptions`. Allow authenticated users to `Create` files at the bucket level. Files are created with user-only read/update permissions.
-10. Copy the Appwrite endpoint, project ID, database ID, collection IDs, and bucket ID into `.env`.
+9. Create staff/admin users manually in Appwrite Auth:
+   - normal patients can self-create accounts in the app
+   - medical workers should be created by the clinic owner/admin
+   - add label `staff` to medical worker users
+   - add label `admin` to owner/admin users
+10. Create a Storage bucket with ID `prescriptions`. Allow authenticated users to `Create` files at the bucket level. Files are created with owner, staff, and admin read/update permissions.
+11. Copy the Appwrite endpoint, project ID, database ID, collection IDs, and bucket ID into `.env`.
 
-If you already created the tables from the earlier demo setup, add `ownerId` and `ownerRole` to every table now, then remove broad table-level read permissions.
+If you already created the tables from the earlier demo setup, add `ownerId` and `ownerRole` to every table now, then remove broad table-level read permissions. Records created before this role update may need to be re-created or manually updated because old documents do not have staff/admin document permissions.
+
+### Fix `Failed to fetch`
+
+This usually means Appwrite blocked the browser origin. If the app is open at:
+
+```txt
+http://192.168.1.106:5175
+```
+
+then Appwrite must have a Web platform hostname:
+
+```txt
+192.168.1.106
+```
+
+Go to:
+
+```txt
+Appwrite Project -> Overview or Settings -> Platforms -> Add Web platform
+```
+
+Add every hostname you use: `localhost`, `127.0.0.1`, and your LAN IP.
 
 ### Collection attributes
 
