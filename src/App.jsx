@@ -89,6 +89,33 @@ const navItems = [
   { id: 'feedback', label: 'Trust', icon: MessageSquare },
 ];
 
+const AUTHORIZED_PATH = '/authorized';
+
+function isAuthorizedRoute() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  const params = new URLSearchParams(window.location.search);
+
+  return path === AUTHORIZED_PATH || params.get('portal') === 'authorized' || window.location.hash === '#authorized';
+}
+
+function isPortalUserAllowed(user, authorizedPortal) {
+  if (!user) {
+    return true;
+  }
+
+  return authorizedPortal ? isCareWorker(user) : !isCareWorker(user);
+}
+
+function getPortalAccessMessage(authorizedPortal) {
+  return authorizedPortal
+    ? 'Authorized access requires an owner-approved staff or admin account.'
+    : 'This entrance is for patient accounts. Use the owner-issued authorized link for care team access.';
+}
+
 function getCarePriority(symptoms = '') {
   const text = symptoms.toLowerCase();
   const critical = ['chest pain', 'breath', 'unconscious', 'stroke', 'bleeding', 'seizure'];
@@ -146,7 +173,7 @@ function getHelpfulError(error) {
 function App() {
   const [activeView, setActiveView] = useState('overview');
   const [currentUser, setCurrentUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState('signin');
   const [authForm, setAuthForm] = useState({
     name: '',
@@ -181,6 +208,7 @@ function App() {
   const [toast, setToast] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const authorizedPortal = useMemo(() => isAuthorizedRoute(), []);
   const userRole = useMemo(() => getUserRole(currentUser), [currentUser]);
   const canManageAll = useMemo(() => isCareWorker(currentUser), [currentUser]);
   const carePriority = useMemo(() => getCarePriority(patient.symptoms), [patient.symptoms]);
@@ -262,7 +290,16 @@ function App() {
     let mounted = true;
 
     getCurrentUser()
-      .then((user) => {
+      .then(async (user) => {
+        if (user && !isPortalUserAllowed(user, authorizedPortal)) {
+          await signOutPatient();
+          if (mounted) {
+            setCurrentUser(null);
+            setToast(getPortalAccessMessage(authorizedPortal));
+          }
+          return;
+        }
+
         if (mounted) {
           setCurrentUser(user);
         }
@@ -281,7 +318,7 @@ function App() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [authorizedPortal]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -333,13 +370,24 @@ function App() {
     setSaving(true);
 
     try {
-      const authAction = authMode === 'signup' ? signUpPatient : signInPatient;
+      const isSignup = authMode === 'signup' && !authorizedPortal;
+      const authAction = isSignup ? signUpPatient : signInPatient;
       const user = await authAction(authForm);
+
+      if (!isPortalUserAllowed(user, authorizedPortal)) {
+        await signOutPatient();
+        setCurrentUser(null);
+        setToast(getPortalAccessMessage(authorizedPortal));
+        return;
+      }
+
       setCurrentUser(user);
       setToast(
-        authMode === 'signup'
+        isSignup
           ? 'Patient account created.'
-          : `${isCareWorker(user) ? 'Care team' : 'Patient'} login successful.`,
+          : authorizedPortal
+            ? 'Authorized workspace opened.'
+            : 'Patient login successful.',
       );
     } catch (error) {
       console.error(error);
@@ -496,6 +544,7 @@ function App() {
         <AuthGate
           authForm={authForm}
           authMode={authMode}
+          authorizedPortal={authorizedPortal}
           onChange={patchState(setAuthForm)}
           onModeChange={setAuthMode}
           onSubmit={handleAuthSubmit}
@@ -652,20 +701,39 @@ function App() {
               </div>
             </Panel>
 
-            <Panel title="Authority Model" icon={Lock} wide>
+            <Panel title={canManageAll ? 'Authorized Access' : 'Privacy Model'} icon={Lock} wide>
               <div className="authority-grid">
-                <div className="authority-item">
-                  <strong>Patient</strong>
-                  <span>Creates an account from this screen and sees only records where they are the owner.</span>
-                </div>
-                <div className="authority-item">
-                  <strong>Doctor or staff</strong>
-                  <span>Logs in with an Appwrite account labeled staff and can manage all patient records.</span>
-                </div>
-                <div className="authority-item">
-                  <strong>Admin</strong>
-                  <span>Logs in with an Appwrite account labeled admin and can manage all records and reports.</span>
-                </div>
+                {canManageAll ? (
+                  <>
+                    <div className="authority-item">
+                      <strong>Patient accounts</strong>
+                      <span>Each patient account can only load rows where its own account is the owner.</span>
+                    </div>
+                    <div className="authority-item">
+                      <strong>Staff accounts</strong>
+                      <span>Accounts labeled staff enter through the authorized link and can review all patient rows.</span>
+                    </div>
+                    <div className="authority-item">
+                      <strong>Admin accounts</strong>
+                      <span>Accounts labeled admin use the same authorized link with full operational access.</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="authority-item">
+                      <strong>Your account</strong>
+                      <span>This portal loads only medical rows owned by your login.</span>
+                    </div>
+                    <div className="authority-item">
+                      <strong>Other patients</strong>
+                      <span>Other patient accounts cannot open your wallet, token, locker, SOS, or feedback rows.</span>
+                    </div>
+                    <div className="authority-item">
+                      <strong>Clinic team</strong>
+                      <span>Owner-approved clinic accounts use a separate authorized link for care coordination.</span>
+                    </div>
+                  </>
+                )}
               </div>
             </Panel>
           </section>
@@ -925,8 +993,19 @@ function App() {
   );
 }
 
-function AuthGate({ authForm, authMode, onChange, onModeChange, onSubmit, saving }) {
-  const isSignup = authMode === 'signup';
+function AuthGate({ authForm, authMode, authorizedPortal, onChange, onModeChange, onSubmit, saving }) {
+  const isSignup = authMode === 'signup' && !authorizedPortal;
+  const authPoints = authorizedPortal
+    ? [
+        { icon: ShieldCheck, copy: 'Owner-approved staff and admin accounts enter here.' },
+        { icon: Lock, copy: 'Only labeled accounts can open the clinic-wide workspace.' },
+        { icon: Users, copy: 'Approved users can review patient records for care coordination.' },
+      ]
+    : [
+        { icon: Lock, copy: 'Your login opens only your saved medical records.' },
+        { icon: CalendarClock, copy: 'Tokens and prescriptions stay tied to your account.' },
+        { icon: ShieldCheck, copy: 'Consent is saved with your private medical wallet.' },
+      ];
 
   return (
     <main className="auth-shell">
@@ -941,45 +1020,46 @@ function AuthGate({ authForm, authMode, onChange, onModeChange, onSubmit, saving
               <span>Medicos India</span>
             </div>
           </div>
-          <p className="eyebrow">Secure healthcare access</p>
-          <h2>Patients get privacy. Care teams get the full clinical view.</h2>
+          <p className="eyebrow">{authorizedPortal ? 'Owner-issued access' : 'Secure healthcare access'}</p>
+          <h2>{authorizedPortal ? 'Authorized care team workspace.' : 'Your private medical wallet starts here.'}</h2>
           <div className="auth-points">
-            <div>
-              <Lock size={18} />
-              <span>Patients see only records they own after login.</span>
-            </div>
-            <div>
-              <ShieldCheck size={18} />
-              <span>Medical workers with Appwrite label staff can manage all patient records.</span>
-            </div>
-            <div>
-              <Users size={18} />
-              <span>Admins with label admin can see every record for operations and reporting.</span>
-            </div>
+            {authPoints.map(({ icon: Icon, copy }) => (
+              <div key={copy}>
+                <Icon size={18} />
+                <span>{copy}</span>
+              </div>
+            ))}
           </div>
         </div>
 
         <form className="auth-card" onSubmit={onSubmit}>
-          <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
-            <button
-              className={authMode === 'signin' ? 'auth-tab active' : 'auth-tab'}
-              type="button"
-              onClick={() => onModeChange('signin')}
-            >
-              Login
-            </button>
-            <button
-              className={authMode === 'signup' ? 'auth-tab active' : 'auth-tab'}
-              type="button"
-              onClick={() => onModeChange('signup')}
-            >
-              Create patient
-            </button>
-          </div>
+          {authorizedPortal ? (
+            <div className="auth-badge">
+              <ShieldCheck size={18} />
+              <span>Authorized entrance</span>
+            </div>
+          ) : (
+            <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
+              <button
+                className={authMode === 'signin' ? 'auth-tab active' : 'auth-tab'}
+                type="button"
+                onClick={() => onModeChange('signin')}
+              >
+                Login
+              </button>
+              <button
+                className={authMode === 'signup' ? 'auth-tab active' : 'auth-tab'}
+                type="button"
+                onClick={() => onModeChange('signup')}
+              >
+                Create account
+              </button>
+            </div>
+          )}
 
           {isSignup && (
             <label className="field">
-              <span>Patient name</span>
+              <span>Full name</span>
               <input name="name" value={authForm.name} onChange={onChange} required />
             </label>
           )}
@@ -1003,12 +1083,16 @@ function AuthGate({ authForm, authMode, onChange, onModeChange, onSubmit, saving
 
           <button className="primary-button full" type="submit" disabled={saving}>
             <Lock size={18} />
-            {isSignup ? 'Create patient account' : 'Login as patient or staff'}
+            {authorizedPortal ? 'Open authorized workspace' : isSignup ? 'Create account' : 'Login'}
           </button>
 
-          {!isSignup && (
+          {authorizedPortal ? (
             <p className="auth-hint">
-              Staff and admin access is issued by the clinic owner.
+              This entrance accepts only owner-approved staff or admin accounts.
+            </p>
+          ) : (
+            <p className="auth-hint">
+              New here? Create an account to keep your records private.
             </p>
           )}
         </form>

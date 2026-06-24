@@ -733,6 +733,19 @@ button {
   background: #eef2f7;
 }
 
+.auth-badge {
+  min-height: 50px;
+  border-radius: 8px;
+  border: 1px solid #b7e2dc;
+  background: #ecfdf5;
+  color: #0f766e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-weight: 800;
+}
+
 .auth-tab {
   border: 0;
   border-radius: 8px;
