@@ -89,6 +89,7 @@ button {
 .nav-item,
 .primary-button,
 .danger-button,
+.secondary-button,
 .icon-button {
   border: 0;
   border-radius: 8px;
@@ -182,6 +183,17 @@ button {
 
 .danger-button:hover {
   background: #9f1239;
+}
+
+.secondary-button {
+  padding: 0 14px;
+  border: 1px solid #cfd8e6;
+  background: #ffffff;
+  color: #172033;
+}
+
+.secondary-button:hover {
+  background: #eef2f7;
 }
 
 .icon-button {
@@ -519,7 +531,16 @@ button {
 
 .record-row {
   align-items: flex-start;
-  flex-direction: column;
+}
+
+.record-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.record-action {
+  flex: 0 0 auto;
+  min-height: 36px;
 }
 
 .record-row strong,
@@ -548,6 +569,7 @@ button {
 .check-row.full,
 .primary-button.full,
 .danger-button.full,
+.secondary-button.full,
 .safety-note.full {
   grid-column: 1 / -1;
 }
@@ -724,6 +746,41 @@ button {
   gap: 14px;
 }
 
+.portal-switch {
+  display: grid;
+  gap: 9px;
+}
+
+.portal-switch > span {
+  color: #334155;
+  font-weight: 800;
+}
+
+.portal-switch > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.portal-option {
+  min-height: 46px;
+  border: 1px solid #cfd8e6;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 800;
+}
+
+.portal-option.active {
+  border-color: #0f766e;
+  background: #ecfdf5;
+  color: #0f766e;
+}
+
 .auth-tabs {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -864,8 +921,13 @@ button:disabled {
   }
 
   .medicine-row,
-  .reminder-row {
+  .reminder-row,
+  .record-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .record-action {
+    width: 100%;
   }
 }

@@ -15,6 +15,7 @@ import {
   LogOut,
   MapPin,
   MessageSquare,
+  Pencil,
   PhoneCall,
   Pill,
   Search,
@@ -36,6 +37,7 @@ import {
   signInPatient,
   signOutPatient,
   signUpPatient,
+  updateRecord,
   uploadPrescriptionFile,
 } from './lib/appwrite';
 import { careGaps, cities, departments, languages, medicineInventory, reminderPlans } from './lib/demoData';
@@ -89,6 +91,24 @@ const navItems = [
   { id: 'feedback', label: 'Trust', icon: MessageSquare },
 ];
 
+const emptyEditingRecords = {
+  patients: null,
+  appointments: null,
+  prescriptions: null,
+  medicineRequests: null,
+  emergencyAlerts: null,
+  feedback: null,
+};
+
+const tableViews = {
+  patients: 'patient',
+  appointments: 'appointments',
+  prescriptions: 'locker',
+  medicineRequests: 'medicines',
+  emergencyAlerts: 'emergency',
+  feedback: 'feedback',
+};
+
 const AUTHORIZED_PATH = '/authorized';
 
 function isAuthorizedRoute() {
@@ -114,6 +134,10 @@ function getPortalAccessMessage(authorizedPortal) {
   return authorizedPortal
     ? 'Authorized access requires an owner-approved staff or admin account.'
     : 'This entrance is for patient accounts. Use the owner-issued authorized link for care team access.';
+}
+
+function asBoolean(value) {
+  return value === true || value === 'true' || value === 'on';
 }
 
 function getCarePriority(symptoms = '') {
@@ -205,6 +229,7 @@ function App() {
     emergencyAlerts: [],
     feedback: [],
   });
+  const [editingRecords, setEditingRecords] = useState(emptyEditingRecords);
   const [toast, setToast] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -351,6 +376,104 @@ function App() {
     };
   }
 
+  function handlePortalChange(nextAuthorizedPortal) {
+    if (nextAuthorizedPortal === authorizedPortal) {
+      return;
+    }
+
+    window.location.assign(nextAuthorizedPortal ? AUTHORIZED_PATH : '/');
+  }
+
+  function clearEditingRecord(tableName) {
+    setEditingRecords((current) => ({
+      ...current,
+      [tableName]: null,
+    }));
+  }
+
+  function beginEditRecord(tableName, row) {
+    if (!canManageAll) {
+      return;
+    }
+
+    setEditingRecords((current) => ({
+      ...current,
+      [tableName]: row,
+    }));
+
+    if (tableViews[tableName]) {
+      setActiveView(tableViews[tableName]);
+    }
+
+    if (tableName === 'patients') {
+      setPatient({
+        name: row.name || '',
+        phone: row.phone || '',
+        age: row.age || '',
+        gender: row.gender || 'Female',
+        city: row.city || 'Bengaluru',
+        language: row.language || 'Hindi',
+        abhaId: row.abhaId || '',
+        symptoms: row.symptoms || '',
+        allergies: row.allergies || '',
+        chronicConditions: row.chronicConditions || '',
+        consent: asBoolean(row.consent),
+      });
+    }
+
+    if (tableName === 'appointments') {
+      setAppointment({
+        patientName: row.patientName || '',
+        phone: row.phone || '',
+        department: row.department || 'General Medicine',
+        mode: row.mode || 'Clinic visit',
+        slot: row.slot || '',
+        notes: row.notes || '',
+      });
+    }
+
+    if (tableName === 'prescriptions') {
+      setPrescription({
+        patientName: row.patientName || '',
+        phone: row.phone || '',
+        doctor: row.doctor || '',
+        medicines: row.medicines || '',
+        notes: row.notes || '',
+      });
+      setPrescriptionFile(null);
+    }
+
+    if (tableName === 'medicineRequests') {
+      setMedicineSearch({
+        query: row.query || '',
+        city: row.city || 'Bengaluru',
+        urgency: row.urgency || 'Today',
+        genericAccepted: asBoolean(row.genericAccepted),
+      });
+    }
+
+    if (tableName === 'emergencyAlerts') {
+      setEmergency({
+        patientName: row.patientName || '',
+        phone: row.phone || '',
+        bloodGroup: row.bloodGroup || 'O+',
+        location: row.location || '',
+        note: row.note || '',
+      });
+    }
+
+    if (tableName === 'feedback') {
+      setFeedback({
+        patientName: row.patientName || '',
+        rating: row.rating || 5,
+        category: row.category || 'Wait time',
+        comment: row.comment || '',
+      });
+    }
+
+    setToast('Record ready to edit.');
+  }
+
   async function saveWithToast(work, message) {
     setSaving(true);
     try {
@@ -363,6 +486,20 @@ function App() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function saveRecord(tableName, data, createMessage, updateMessage) {
+    const editingRow = editingRecords[tableName];
+
+    await saveWithToast(async () => {
+      if (editingRow?.$id) {
+        await updateRecord(tableName, editingRow.$id, data, currentUser);
+        clearEditingRecord(tableName);
+        return;
+      }
+
+      await createRecord(tableName, data, currentUser);
+    }, editingRow ? updateMessage : createMessage);
   }
 
   async function handleAuthSubmit(event) {
@@ -430,14 +567,15 @@ function App() {
       return;
     }
 
-    await saveWithToast(
-      () =>
-        createRecord('patients', {
-          ...patient,
-          age: Number(patient.age || 0),
-          priority: carePriority.level,
-        }, currentUser),
+    await saveRecord(
+      'patients',
+      {
+        ...patient,
+        age: Number(patient.age || 0),
+        priority: carePriority.level,
+      },
       'Patient wallet saved.',
+      'Patient wallet updated.',
     );
     hydrateFromPatient();
   }
@@ -445,78 +583,94 @@ function App() {
   async function handleAppointmentSubmit(event) {
     event.preventDefault();
     const priority = getCarePriority(patient.symptoms);
-    await saveWithToast(
-      () =>
-        createRecord('appointments', {
-          ...appointment,
-          patientName: appointment.patientName || patient.name,
-          phone: appointment.phone || patient.phone,
-          token: makeToken(appointment.department),
-          status: 'Booked',
-          priority: priority.level,
-        }, currentUser),
+    const editingAppointment = editingRecords.appointments;
+    await saveRecord(
+      'appointments',
+      {
+        ...appointment,
+        patientName: appointment.patientName || patient.name,
+        phone: appointment.phone || patient.phone,
+        token: editingAppointment?.token || makeToken(appointment.department),
+        status: editingAppointment?.status || 'Booked',
+        priority: priority.level,
+      },
       'Care token booked.',
+      'Care token updated.',
     );
   }
 
   async function handlePrescriptionSubmit(event) {
     event.preventDefault();
+    const editingPrescription = editingRecords.prescriptions;
     await saveWithToast(async () => {
-      const uploadedFile = await uploadPrescriptionFile(prescriptionFile, currentUser);
-      await createRecord('prescriptions', {
+      const uploadedFile = prescriptionFile
+        ? await uploadPrescriptionFile(prescriptionFile, currentUser)
+        : null;
+      const data = {
         ...prescription,
         patientName: prescription.patientName || patient.name,
         phone: prescription.phone || patient.phone,
-        fileName: prescriptionFile?.name || '',
-        fileId: uploadedFile?.$id || '',
-      }, currentUser);
+        fileName: prescriptionFile?.name || editingPrescription?.fileName || '',
+        fileId: uploadedFile?.$id || editingPrescription?.fileId || '',
+      };
+
+      if (editingPrescription?.$id) {
+        await updateRecord('prescriptions', editingPrescription.$id, data, currentUser);
+        clearEditingRecord('prescriptions');
+      } else {
+        await createRecord('prescriptions', data, currentUser);
+      }
       setPrescriptionFile(null);
-    }, 'Medical locker updated.');
+    }, editingPrescription ? 'Medical locker record updated.' : 'Medical locker updated.');
   }
 
   async function handleMedicineSubmit(event) {
     event.preventDefault();
-    await saveWithToast(
-      () =>
-        createRecord('medicineRequests', {
-          ...medicineSearch,
-          matches: JSON.stringify(
-            medicineMatches.slice(0, 4).map((item) => ({
-              name: item.name,
-              generic: item.generic,
-              price: item.price,
-              pharmacy: item.pharmacy,
-              stock: item.stock,
-            })),
-          ),
-        }, currentUser),
+    await saveRecord(
+      'medicineRequests',
+      {
+        ...medicineSearch,
+        matches: JSON.stringify(
+          medicineMatches.slice(0, 4).map((item) => ({
+            name: item.name,
+            generic: item.generic,
+            price: item.price,
+            pharmacy: item.pharmacy,
+            stock: item.stock,
+          })),
+        ),
+      },
       'Medicine request saved.',
+      'Medicine request updated.',
     );
   }
 
   async function handleEmergencySubmit(event) {
     event.preventDefault();
-    await saveWithToast(
-      () =>
-        createRecord('emergencyAlerts', {
-          ...emergency,
-          patientName: emergency.patientName || patient.name,
-          phone: emergency.phone || patient.phone,
-          status: 'Ready for care desk',
-        }, currentUser),
+    const editingEmergency = editingRecords.emergencyAlerts;
+    await saveRecord(
+      'emergencyAlerts',
+      {
+        ...emergency,
+        patientName: emergency.patientName || patient.name,
+        phone: emergency.phone || patient.phone,
+        status: editingEmergency?.status || 'Ready for care desk',
+      },
       'SOS profile saved.',
+      'SOS profile updated.',
     );
   }
 
   async function handleFeedbackSubmit(event) {
     event.preventDefault();
-    await saveWithToast(
-      () =>
-        createRecord('feedback', {
-          ...feedback,
-          rating: Number(feedback.rating),
-        }, currentUser),
+    await saveRecord(
+      'feedback',
+      {
+        ...feedback,
+        rating: Number(feedback.rating),
+      },
       'Feedback captured.',
+      'Feedback updated.',
     );
   }
 
@@ -547,6 +701,7 @@ function App() {
           authorizedPortal={authorizedPortal}
           onChange={patchState(setAuthForm)}
           onModeChange={setAuthMode}
+          onPortalChange={handlePortalChange}
           onSubmit={handleAuthSubmit}
           saving={saving}
         />
@@ -765,8 +920,13 @@ function App() {
                 </label>
                 <button className="primary-button full" type="submit" disabled={saving}>
                   <ShieldCheck size={18} />
-                  Save patient wallet
+                  {editingRecords.patients ? 'Update patient wallet' : 'Save patient wallet'}
                 </button>
+                {editingRecords.patients && (
+                  <button className="secondary-button full" type="button" onClick={() => clearEditingRecord('patients')}>
+                    Cancel edit
+                  </button>
+                )}
               </form>
             </Panel>
 
@@ -774,6 +934,7 @@ function App() {
               <RecordList
                 empty="No patient wallets yet."
                 rows={records.patients}
+                onEdit={canManageAll ? (row) => beginEditRecord('patients', row) : null}
                 render={(row) => (
                   <>
                     <strong>{row.name || 'Unnamed patient'}</strong>
@@ -800,8 +961,13 @@ function App() {
                 </label>
                 <button className="primary-button full" type="submit" disabled={saving}>
                   <CalendarClock size={18} />
-                  Book token
+                  {editingRecords.appointments ? 'Update token' : 'Book token'}
                 </button>
+                {editingRecords.appointments && (
+                  <button className="secondary-button full" type="button" onClick={() => clearEditingRecord('appointments')}>
+                    Cancel edit
+                  </button>
+                )}
               </form>
             </Panel>
 
@@ -809,6 +975,7 @@ function App() {
               <RecordList
                 empty="No token requests yet."
                 rows={records.appointments}
+                onEdit={canManageAll ? (row) => beginEditRecord('appointments', row) : null}
                 render={(row) => (
                   <>
                     <strong>{row.token || 'Token pending'} | {row.department}</strong>
@@ -841,8 +1008,13 @@ function App() {
                 </label>
                 <button className="primary-button full" type="submit" disabled={saving}>
                   <UploadCloud size={18} />
-                  Save to locker
+                  {editingRecords.prescriptions ? 'Update locker record' : 'Save to locker'}
                 </button>
+                {editingRecords.prescriptions && (
+                  <button className="secondary-button full" type="button" onClick={() => clearEditingRecord('prescriptions')}>
+                    Cancel edit
+                  </button>
+                )}
               </form>
             </Panel>
 
@@ -850,6 +1022,7 @@ function App() {
               <RecordList
                 empty="No locker files yet."
                 rows={records.prescriptions}
+                onEdit={canManageAll ? (row) => beginEditRecord('prescriptions', row) : null}
                 render={(row) => (
                   <>
                     <strong>{row.fileName || 'Prescription note'}</strong>
@@ -874,8 +1047,13 @@ function App() {
                 </label>
                 <button className="primary-button full" type="submit" disabled={saving}>
                   <Search size={18} />
-                  Save request
+                  {editingRecords.medicineRequests ? 'Update request' : 'Save request'}
                 </button>
+                {editingRecords.medicineRequests && (
+                  <button className="secondary-button full" type="button" onClick={() => clearEditingRecord('medicineRequests')}>
+                    Cancel edit
+                  </button>
+                )}
               </form>
               <div className="medicine-list">
                 {medicineMatches.length ? (
@@ -901,6 +1079,7 @@ function App() {
               <RecordList
                 empty="No medicine requests yet."
                 rows={records.medicineRequests}
+                onEdit={canManageAll ? (row) => beginEditRecord('medicineRequests', row) : null}
                 render={(row) => (
                   <>
                     <strong>{row.query || 'Medicine request'}</strong>
@@ -930,8 +1109,13 @@ function App() {
                 </div>
                 <button className="danger-button full" type="submit" disabled={saving}>
                   <PhoneCall size={18} />
-                  Save SOS profile
+                  {editingRecords.emergencyAlerts ? 'Update SOS profile' : 'Save SOS profile'}
                 </button>
+                {editingRecords.emergencyAlerts && (
+                  <button className="secondary-button full" type="button" onClick={() => clearEditingRecord('emergencyAlerts')}>
+                    Cancel edit
+                  </button>
+                )}
               </form>
             </Panel>
 
@@ -939,6 +1123,7 @@ function App() {
               <RecordList
                 empty="No SOS profiles yet."
                 rows={records.emergencyAlerts}
+                onEdit={canManageAll ? (row) => beginEditRecord('emergencyAlerts', row) : null}
                 render={(row) => (
                   <>
                     <strong>{row.patientName} | {row.bloodGroup}</strong>
@@ -967,8 +1152,13 @@ function App() {
                 </label>
                 <button className="primary-button full" type="submit" disabled={saving}>
                   <Send size={18} />
-                  Save feedback
+                  {editingRecords.feedback ? 'Update feedback' : 'Save feedback'}
                 </button>
+                {editingRecords.feedback && (
+                  <button className="secondary-button full" type="button" onClick={() => clearEditingRecord('feedback')}>
+                    Cancel edit
+                  </button>
+                )}
               </form>
             </Panel>
 
@@ -976,6 +1166,7 @@ function App() {
               <RecordList
                 empty="No feedback yet."
                 rows={records.feedback}
+                onEdit={canManageAll ? (row) => beginEditRecord('feedback', row) : null}
                 render={(row) => (
                   <>
                     <strong>{row.rating}/5 | {row.category}</strong>
@@ -993,7 +1184,16 @@ function App() {
   );
 }
 
-function AuthGate({ authForm, authMode, authorizedPortal, onChange, onModeChange, onSubmit, saving }) {
+function AuthGate({
+  authForm,
+  authMode,
+  authorizedPortal,
+  onChange,
+  onModeChange,
+  onPortalChange,
+  onSubmit,
+  saving,
+}) {
   const isSignup = authMode === 'signup' && !authorizedPortal;
   const authPoints = authorizedPortal
     ? [
@@ -1033,6 +1233,28 @@ function AuthGate({ authForm, authMode, authorizedPortal, onChange, onModeChange
         </div>
 
         <form className="auth-card" onSubmit={onSubmit}>
+          <div className="portal-switch" aria-label="Choose access type">
+            <span>Who are you?</span>
+            <div>
+              <button
+                className={authorizedPortal ? 'portal-option' : 'portal-option active'}
+                type="button"
+                onClick={() => onPortalChange(false)}
+              >
+                <Users size={17} />
+                Patient
+              </button>
+              <button
+                className={authorizedPortal ? 'portal-option active' : 'portal-option'}
+                type="button"
+                onClick={() => onPortalChange(true)}
+              >
+                <ShieldCheck size={17} />
+                Authorized
+              </button>
+            </div>
+          </div>
+
           {authorizedPortal ? (
             <div className="auth-badge">
               <ShieldCheck size={18} />
@@ -1151,7 +1373,7 @@ function SelectField({ label, name, value, onChange, options }) {
   );
 }
 
-function RecordList({ rows, render, empty }) {
+function RecordList({ rows, render, empty, onEdit }) {
   if (!rows.length) {
     return <p className="empty-copy">{empty}</p>;
   }
@@ -1160,7 +1382,15 @@ function RecordList({ rows, render, empty }) {
     <div className="record-list">
       {rows.map((row) => (
         <div className="record-row" key={row.$id}>
-          {render(row)}
+          <div className="record-main">
+            {render(row)}
+          </div>
+          {onEdit && (
+            <button className="secondary-button record-action" type="button" onClick={() => onEdit(row)}>
+              <Pencil size={15} />
+              Edit
+            </button>
+          )}
         </div>
       ))}
     </div>

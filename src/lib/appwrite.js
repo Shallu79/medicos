@@ -160,6 +160,23 @@ function sanitizeData(data) {
   );
 }
 
+function cleanRecordPayload(data) {
+  const blockedKeys = new Set([
+    '$id',
+    '$createdAt',
+    '$updatedAt',
+    '$permissions',
+    'id',
+    'ownerId',
+    'ownerRole',
+    'createdAt',
+  ]);
+
+  return Object.fromEntries(
+    Object.entries(data).filter(([key]) => !blockedKeys.has(key)),
+  );
+}
+
 function getPrivatePermissions(userId) {
   return [
     Permission.read(Role.user(userId)),
@@ -200,6 +217,56 @@ export async function createRecord(tableName, data, currentUser) {
   setLocalRows(tableName, nextRows);
   await syncToMongo(`${tableName}.created`, localRow);
   return localRow;
+}
+
+export async function updateRecord(tableName, recordId, data, currentUser) {
+  if (!currentUser?.$id) {
+    throw new Error('Please log in before updating medical records.');
+  }
+
+  if (!recordId) {
+    throw new Error('Choose a record before updating.');
+  }
+
+  const rowData = sanitizeData(cleanRecordPayload(data));
+
+  if (appwriteStatus.configured && config.collections[tableName]) {
+    const row = await databases.updateDocument(
+      config.databaseId,
+      config.collections[tableName],
+      recordId,
+      rowData,
+    );
+    await syncToMongo(`${tableName}.updated`, row);
+    return normalizeRow(row);
+  }
+
+  const rows = getLocalRows(tableName);
+  const rowIndex = rows.findIndex((row) => row.$id === recordId || row.id === recordId);
+
+  if (rowIndex === -1) {
+    throw new Error('Record not found.');
+  }
+
+  const existingRow = normalizeRow(rows[rowIndex]);
+
+  if (!isCareWorker(currentUser) && existingRow.ownerId !== currentUser.$id) {
+    throw new Error('You can update only your own medical records.');
+  }
+
+  const updatedRow = normalizeRow({
+    ...existingRow,
+    ...rowData,
+    ownerId: existingRow.ownerId,
+    ownerRole: existingRow.ownerRole,
+    createdAt: existingRow.createdAt,
+    $createdAt: existingRow.$createdAt,
+  });
+  const nextRows = [...rows];
+  nextRows[rowIndex] = updatedRow;
+  setLocalRows(tableName, nextRows);
+  await syncToMongo(`${tableName}.updated`, updatedRow);
+  return updatedRow;
 }
 
 export async function listRecent(tableName, currentUser, limit = 12) {

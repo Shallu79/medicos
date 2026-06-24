@@ -8,11 +8,11 @@ This version supports two secure user types.
 
 | User | Access |
 | --- | --- |
-| Patient/customer | Opens `/`, creates an account, and can read only their own patient wallet, appointments, prescriptions, medicine requests, SOS profile, and feedback. |
-| Doctor/staff/medical worker | Opens `/authorized` and can read/update all patient records when their Appwrite user has the `staff` label. |
-| Admin/owner | Opens `/authorized` and can read/update all records when their Appwrite user has the `admin` label. |
+| Patient/customer | Chooses `Patient`, creates an account if needed, and can read only their own patient wallet, appointments, prescriptions, medicine requests, SOS profile, and feedback. |
+| Doctor/staff/medical worker | Chooses `Authorized` or opens `/authorized`, signs in with email/password, and can read/update all patient records when their Appwrite user has the `staff` label. |
+| Admin/owner | Chooses `Authorized` or opens `/authorized`, signs in with email/password, and can read/update all records when their Appwrite user has the `admin` label. |
 
-Every record created by the app stores `ownerId` and `ownerRole`. Appwrite documents/files are created with permissions for the owner plus Appwrite users labeled `staff` or `admin`. The public entrance signs out staff/admin accounts and the authorized entrance rejects normal patient accounts, so the visible workspace matches the login route.
+Every record created by the app stores `ownerId` and `ownerRole`. Appwrite documents/files are created with permissions for the owner plus Appwrite users labeled `staff` or `admin`. Normal patient accounts cannot open the authorized workspace, and staff/admin accounts cannot use the patient entrance.
 
 ## Run locally
 
@@ -22,9 +22,9 @@ cp .env.example .env
 npm run dev
 ```
 
-Open `http://localhost:5173` for patient login.
+Open `http://localhost:5173` and choose `Patient` or `Authorized`.
 
-Open `http://localhost:5173/authorized` only for owner-created staff/admin login.
+Open `http://localhost:5173/authorized` directly only for owner-created staff/admin login.
 
 ## Appwrite manual setup
 
