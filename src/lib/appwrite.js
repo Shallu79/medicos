@@ -54,11 +54,11 @@ export const appwriteStatus = {
 export function getUserRole(user) {
   const labels = user?.labels || [];
 
-  if (labels.includes('admin')) {
+  if (labels.includes('admin') || labels.includes('owner')) {
     return 'admin';
   }
 
-  if (labels.includes('staff')) {
+  if (labels.includes('staff') || labels.includes('authorized')) {
     return 'staff';
   }
 
@@ -177,14 +177,10 @@ function cleanRecordPayload(data) {
   );
 }
 
-function getPrivatePermissions(userId) {
+function getOwnerPermissions(userId) {
   return [
     Permission.read(Role.user(userId)),
     Permission.update(Role.user(userId)),
-    Permission.read(Role.label('staff')),
-    Permission.update(Role.label('staff')),
-    Permission.read(Role.label('admin')),
-    Permission.update(Role.label('admin')),
   ];
 }
 
@@ -206,7 +202,7 @@ export async function createRecord(tableName, data, currentUser) {
       config.collections[tableName],
       ID.unique(),
       rowData,
-      getPrivatePermissions(currentUser.$id),
+      getOwnerPermissions(currentUser.$id),
     );
     await syncToMongo(`${tableName}.created`, row);
     return normalizeRow(row);
@@ -309,7 +305,7 @@ export async function uploadPrescriptionFile(file, currentUser) {
   }
 
   if (appwriteStatus.configured && config.bucketId) {
-    return storage.createFile(config.bucketId, ID.unique(), file, getPrivatePermissions(currentUser.$id));
+    return storage.createFile(config.bucketId, ID.unique(), file, getOwnerPermissions(currentUser.$id));
   }
 
   return {

@@ -82,13 +82,13 @@ const initialEmergency = {
 };
 
 const navItems = [
-  { id: 'overview', label: 'Command', icon: Activity },
-  { id: 'patient', label: 'Patient', icon: Users },
-  { id: 'appointments', label: 'Tokens', icon: CalendarClock },
-  { id: 'locker', label: 'Locker', icon: FileText },
-  { id: 'medicines', label: 'Medicines', icon: Pill },
-  { id: 'emergency', label: 'SOS', icon: PhoneCall },
-  { id: 'feedback', label: 'Trust', icon: MessageSquare },
+  { id: 'overview', patientLabel: 'Home', careLabel: 'Command', icon: Activity },
+  { id: 'patient', patientLabel: 'My Health', careLabel: 'Patients', icon: Users },
+  { id: 'appointments', patientLabel: 'Book Visit', careLabel: 'Tokens', icon: CalendarClock },
+  { id: 'locker', patientLabel: 'Reports', careLabel: 'Locker', icon: FileText },
+  { id: 'medicines', patientLabel: 'Medicines', careLabel: 'Medicines', icon: Pill },
+  { id: 'emergency', patientLabel: 'SOS Card', careLabel: 'SOS', icon: PhoneCall },
+  { id: 'feedback', patientLabel: 'Feedback', careLabel: 'Trust', icon: MessageSquare },
 ];
 
 const emptyEditingRecords = {
@@ -189,6 +189,10 @@ function formatMoney(value) {
 function getHelpfulError(error) {
   if (error?.message === 'Failed to fetch') {
     return `Failed to reach Appwrite. Add "${window.location.hostname}" in Appwrite Project -> Platforms, then restart the app.`;
+  }
+
+  if (error?.message?.toLowerCase().includes('permission')) {
+    return 'Appwrite permissions need setup: allow users to Create rows, and allow staff/authorized/admin/owner labels to Read and Update rows.';
   }
 
   return error?.message || 'Something went wrong.';
@@ -726,16 +730,17 @@ function App() {
         <nav className="nav-list" aria-label="CareBridge sections">
           {navItems.map((item) => {
             const Icon = item.icon;
+            const label = canManageAll ? item.careLabel : item.patientLabel;
             return (
               <button
                 className={activeView === item.id ? 'nav-item active' : 'nav-item'}
                 key={item.id}
                 type="button"
-                title={item.label}
+                title={label}
                 onClick={() => setActiveView(item.id)}
               >
                 <Icon size={18} />
-                <span>{item.label}</span>
+                <span>{label}</span>
               </button>
             );
           })}
@@ -758,8 +763,8 @@ function App() {
         <div className="authority-card">
           {canManageAll ? <ShieldCheck size={18} /> : <Lock size={18} />}
           <div>
-            <strong>{currentUser.name || 'Patient account'}</strong>
-            <span>{userRole === 'admin' ? 'Admin' : canManageAll ? 'Medical worker' : 'Patient'} | {currentUser.email || 'Signed in locally'}</span>
+            <strong>{currentUser.name || (canManageAll ? 'Authorized account' : 'Patient account')}</strong>
+            <span>{userRole === 'admin' ? 'Owner/admin' : canManageAll ? 'Authorized staff' : 'Patient'} | {currentUser.email || 'Signed in locally'}</span>
           </div>
         </div>
       </aside>
@@ -767,11 +772,11 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">{canManageAll ? 'Care team workspace' : 'Private patient portal'}</p>
+            <p className="eyebrow">{canManageAll ? 'Authorized clinic workspace' : 'Private patient portal'}</p>
             <h2>
               {canManageAll
-                ? 'Manage all patient records, tokens, prescriptions, and care alerts.'
-                : 'Your records, appointments, prescriptions, medicines, and care alerts.'}
+                ? 'Review and update every patient record from one controlled workspace.'
+                : 'Your health profile, visits, reports, medicines, SOS card, and feedback.'}
             </h2>
           </div>
           <div className="top-actions">
@@ -780,7 +785,7 @@ function App() {
             </button>
             <button type="button" className="primary-button" onClick={() => setActiveView('patient')}>
               <ShieldCheck size={18} />
-              {canManageAll ? 'New patient' : 'New wallet'}
+              {canManageAll ? 'Add patient' : 'My health profile'}
             </button>
             <button type="button" className="icon-button" title="Log out" onClick={handleSignOut} disabled={saving}>
               <LogOut size={18} />
@@ -789,15 +794,15 @@ function App() {
         </header>
 
         <section className="metric-grid" aria-label="Care metrics">
-          <Metric label={canManageAll ? 'Patient records' : 'Saved patients'} value={records.patients.length} icon={Users} tone="teal" />
-          <Metric label={canManageAll ? 'Queue tokens' : 'Open tokens'} value={records.appointments.length} icon={CalendarClock} tone="blue" />
-          <Metric label="Locker files" value={records.prescriptions.length} icon={FileText} tone="amber" />
-          <Metric label="SOS profiles" value={records.emergencyAlerts.length} icon={PhoneCall} tone="rose" />
+          <Metric label={canManageAll ? 'Patient records' : 'My profiles'} value={records.patients.length} icon={Users} tone="teal" />
+          <Metric label={canManageAll ? 'Queue tokens' : 'My visits'} value={records.appointments.length} icon={CalendarClock} tone="blue" />
+          <Metric label={canManageAll ? 'Locker files' : 'My reports'} value={records.prescriptions.length} icon={FileText} tone="amber" />
+          <Metric label={canManageAll ? 'SOS profiles' : 'SOS cards'} value={records.emergencyAlerts.length} icon={PhoneCall} tone="rose" />
         </section>
 
         {activeView === 'overview' && (
           <section className="view-grid">
-            <Panel title="Care Brief" icon={Stethoscope}>
+            <Panel title={canManageAll ? 'Care Brief' : 'My Care Brief'} icon={Stethoscope}>
               <div className="brief-list">
                 {careBrief.map((item) => (
                   <div className="brief-item" key={item}>
@@ -815,7 +820,7 @@ function App() {
               </div>
             </Panel>
 
-            <Panel title="Care Map" icon={MapPin}>
+            <Panel title={canManageAll ? 'Care Map' : 'Visit Map'} icon={MapPin}>
               <div className="care-map">
                 <div className="map-station main">Clinic desk</div>
                 <div className="map-station lab">Diagnostics</div>
@@ -830,7 +835,7 @@ function App() {
               </div>
             </Panel>
 
-            <Panel title="Experience Gaps Solved" icon={Database} wide>
+            <Panel title={canManageAll ? 'Experience Gaps Solved' : 'What You Can Do Here'} icon={Database} wide>
               <div className="gap-grid">
                 {careGaps.map((gap) => (
                   <article className="gap-item" key={gap.title}>
@@ -842,7 +847,7 @@ function App() {
               </div>
             </Panel>
 
-            <Panel title="Continuity Plan" icon={BellRing} wide>
+            <Panel title={canManageAll ? 'Continuity Plan' : 'My Follow-Up Plan'} icon={BellRing} wide>
               <div className="reminder-grid">
                 {reminderPlans.map((plan) => (
                   <div className="reminder-row" key={plan.title}>
@@ -865,12 +870,12 @@ function App() {
                       <span>Each patient account can only load rows where its own account is the owner.</span>
                     </div>
                     <div className="authority-item">
-                      <strong>Staff accounts</strong>
-                      <span>Accounts labeled staff enter through the authorized link and can review all patient rows.</span>
+                      <strong>Authorized accounts</strong>
+                      <span>Accounts labeled staff or authorized enter through the authorized link and can review all patient rows.</span>
                     </div>
                     <div className="authority-item">
-                      <strong>Admin accounts</strong>
-                      <span>Accounts labeled admin use the same authorized link with full operational access.</span>
+                      <strong>Owner accounts</strong>
+                      <span>Accounts labeled admin or owner use the same authorized link with full operational access.</span>
                     </div>
                   </>
                 ) : (
@@ -896,7 +901,7 @@ function App() {
 
         {activeView === 'patient' && (
           <section className="two-column">
-            <Panel title="Patient Wallet" icon={Users}>
+            <Panel title={canManageAll ? 'Patient Wallet' : 'My Health Profile'} icon={Users}>
               <form className="form-grid" onSubmit={handlePatientSubmit}>
                 <TextField label="Full name" name="name" value={patient.name} onChange={patchState(setPatient)} required />
                 <TextField label="Mobile number" name="phone" value={patient.phone} onChange={patchState(setPatient)} required />
@@ -920,7 +925,9 @@ function App() {
                 </label>
                 <button className="primary-button full" type="submit" disabled={saving}>
                   <ShieldCheck size={18} />
-                  {editingRecords.patients ? 'Update patient wallet' : 'Save patient wallet'}
+                  {editingRecords.patients
+                    ? 'Update patient wallet'
+                    : canManageAll ? 'Save patient wallet' : 'Save my health profile'}
                 </button>
                 {editingRecords.patients && (
                   <button className="secondary-button full" type="button" onClick={() => clearEditingRecord('patients')}>
@@ -930,9 +937,9 @@ function App() {
               </form>
             </Panel>
 
-            <Panel title="Saved Patients" icon={Activity}>
+            <Panel title={canManageAll ? 'All Patients' : 'My Saved Profile'} icon={Activity}>
               <RecordList
-                empty="No patient wallets yet."
+                empty={canManageAll ? 'No patient wallets yet.' : 'No health profile saved yet.'}
                 rows={records.patients}
                 onEdit={canManageAll ? (row) => beginEditRecord('patients', row) : null}
                 render={(row) => (
@@ -948,7 +955,7 @@ function App() {
 
         {activeView === 'appointments' && (
           <section className="two-column">
-            <Panel title="Token Booking" icon={CalendarClock}>
+            <Panel title={canManageAll ? 'Token Booking' : 'Book My Visit'} icon={CalendarClock}>
               <form className="form-grid" onSubmit={handleAppointmentSubmit}>
                 <TextField label="Patient name" name="patientName" value={appointment.patientName} onChange={patchState(setAppointment)} required />
                 <TextField label="Mobile number" name="phone" value={appointment.phone} onChange={patchState(setAppointment)} required />
@@ -961,7 +968,7 @@ function App() {
                 </label>
                 <button className="primary-button full" type="submit" disabled={saving}>
                   <CalendarClock size={18} />
-                  {editingRecords.appointments ? 'Update token' : 'Book token'}
+                  {editingRecords.appointments ? 'Update token' : canManageAll ? 'Book token' : 'Book my visit'}
                 </button>
                 {editingRecords.appointments && (
                   <button className="secondary-button full" type="button" onClick={() => clearEditingRecord('appointments')}>
@@ -971,9 +978,9 @@ function App() {
               </form>
             </Panel>
 
-            <Panel title="Recent Tokens" icon={Activity}>
+            <Panel title={canManageAll ? 'Recent Tokens' : 'My Visits'} icon={Activity}>
               <RecordList
-                empty="No token requests yet."
+                empty={canManageAll ? 'No token requests yet.' : 'No visits booked yet.'}
                 rows={records.appointments}
                 onEdit={canManageAll ? (row) => beginEditRecord('appointments', row) : null}
                 render={(row) => (
@@ -989,7 +996,7 @@ function App() {
 
         {activeView === 'locker' && (
           <section className="two-column">
-            <Panel title="Medical Locker" icon={FileText}>
+            <Panel title={canManageAll ? 'Medical Locker' : 'My Reports'} icon={FileText}>
               <form className="form-grid" onSubmit={handlePrescriptionSubmit}>
                 <TextField label="Patient name" name="patientName" value={prescription.patientName} onChange={patchState(setPrescription)} required />
                 <TextField label="Mobile number" name="phone" value={prescription.phone} onChange={patchState(setPrescription)} required />
@@ -1008,7 +1015,7 @@ function App() {
                 </label>
                 <button className="primary-button full" type="submit" disabled={saving}>
                   <UploadCloud size={18} />
-                  {editingRecords.prescriptions ? 'Update locker record' : 'Save to locker'}
+                  {editingRecords.prescriptions ? 'Update locker record' : canManageAll ? 'Save to locker' : 'Save my report'}
                 </button>
                 {editingRecords.prescriptions && (
                   <button className="secondary-button full" type="button" onClick={() => clearEditingRecord('prescriptions')}>
@@ -1018,9 +1025,9 @@ function App() {
               </form>
             </Panel>
 
-            <Panel title="Locker History" icon={FileText}>
+            <Panel title={canManageAll ? 'Locker History' : 'My Report History'} icon={FileText}>
               <RecordList
-                empty="No locker files yet."
+                empty={canManageAll ? 'No locker files yet.' : 'No reports saved yet.'}
                 rows={records.prescriptions}
                 onEdit={canManageAll ? (row) => beginEditRecord('prescriptions', row) : null}
                 render={(row) => (
@@ -1036,7 +1043,7 @@ function App() {
 
         {activeView === 'medicines' && (
           <section className="two-column">
-            <Panel title="Medicine Finder" icon={Pill}>
+            <Panel title={canManageAll ? 'Medicine Finder' : 'Find My Medicines'} icon={Pill}>
               <form className="form-grid" onSubmit={handleMedicineSubmit}>
                 <TextField label="Medicine or condition" name="query" value={medicineSearch.query} onChange={patchState(setMedicineSearch)} />
                 <SelectField label="City" name="city" value={medicineSearch.city} onChange={patchState(setMedicineSearch)} options={cities} />
@@ -1047,7 +1054,7 @@ function App() {
                 </label>
                 <button className="primary-button full" type="submit" disabled={saving}>
                   <Search size={18} />
-                  {editingRecords.medicineRequests ? 'Update request' : 'Save request'}
+                  {editingRecords.medicineRequests ? 'Update request' : canManageAll ? 'Save request' : 'Save my medicine request'}
                 </button>
                 {editingRecords.medicineRequests && (
                   <button className="secondary-button full" type="button" onClick={() => clearEditingRecord('medicineRequests')}>
@@ -1075,9 +1082,9 @@ function App() {
               </div>
             </Panel>
 
-            <Panel title="Saved Requests" icon={Pill}>
+            <Panel title={canManageAll ? 'Saved Requests' : 'My Medicine Requests'} icon={Pill}>
               <RecordList
-                empty="No medicine requests yet."
+                empty={canManageAll ? 'No medicine requests yet.' : 'No medicine requests saved yet.'}
                 rows={records.medicineRequests}
                 onEdit={canManageAll ? (row) => beginEditRecord('medicineRequests', row) : null}
                 render={(row) => (
@@ -1093,7 +1100,7 @@ function App() {
 
         {activeView === 'emergency' && (
           <section className="two-column">
-            <Panel title="SOS Profile" icon={PhoneCall}>
+            <Panel title={canManageAll ? 'SOS Profile' : 'My SOS Card'} icon={PhoneCall}>
               <form className="form-grid" onSubmit={handleEmergencySubmit}>
                 <TextField label="Patient name" name="patientName" value={emergency.patientName} onChange={patchState(setEmergency)} required />
                 <TextField label="Mobile number" name="phone" value={emergency.phone} onChange={patchState(setEmergency)} required />
@@ -1109,7 +1116,7 @@ function App() {
                 </div>
                 <button className="danger-button full" type="submit" disabled={saving}>
                   <PhoneCall size={18} />
-                  {editingRecords.emergencyAlerts ? 'Update SOS profile' : 'Save SOS profile'}
+                  {editingRecords.emergencyAlerts ? 'Update SOS profile' : canManageAll ? 'Save SOS profile' : 'Save my SOS card'}
                 </button>
                 {editingRecords.emergencyAlerts && (
                   <button className="secondary-button full" type="button" onClick={() => clearEditingRecord('emergencyAlerts')}>
@@ -1119,9 +1126,9 @@ function App() {
               </form>
             </Panel>
 
-            <Panel title="Ready Profiles" icon={Activity}>
+            <Panel title={canManageAll ? 'Ready Profiles' : 'My SOS History'} icon={Activity}>
               <RecordList
-                empty="No SOS profiles yet."
+                empty={canManageAll ? 'No SOS profiles yet.' : 'No SOS card saved yet.'}
                 rows={records.emergencyAlerts}
                 onEdit={canManageAll ? (row) => beginEditRecord('emergencyAlerts', row) : null}
                 render={(row) => (
@@ -1137,7 +1144,7 @@ function App() {
 
         {activeView === 'feedback' && (
           <section className="two-column">
-            <Panel title="Trust Capture" icon={MessageSquare}>
+            <Panel title={canManageAll ? 'Trust Capture' : 'My Feedback'} icon={MessageSquare}>
               <form className="form-grid" onSubmit={handleFeedbackSubmit}>
                 <TextField label="Patient name" name="patientName" value={feedback.patientName} onChange={patchState(setFeedback)} required />
                 <SelectField label="Category" name="category" value={feedback.category} onChange={patchState(setFeedback)} options={['Wait time', 'Doctor clarity', 'Medicine cost', 'Cleanliness', 'Follow-up']} />
@@ -1152,7 +1159,7 @@ function App() {
                 </label>
                 <button className="primary-button full" type="submit" disabled={saving}>
                   <Send size={18} />
-                  {editingRecords.feedback ? 'Update feedback' : 'Save feedback'}
+                  {editingRecords.feedback ? 'Update feedback' : canManageAll ? 'Save feedback' : 'Send my feedback'}
                 </button>
                 {editingRecords.feedback && (
                   <button className="secondary-button full" type="button" onClick={() => clearEditingRecord('feedback')}>
@@ -1162,9 +1169,9 @@ function App() {
               </form>
             </Panel>
 
-            <Panel title="Patient Voice" icon={Languages}>
+            <Panel title={canManageAll ? 'Patient Voice' : 'My Feedback History'} icon={Languages}>
               <RecordList
-                empty="No feedback yet."
+                empty={canManageAll ? 'No feedback yet.' : 'No feedback sent yet.'}
                 rows={records.feedback}
                 onEdit={canManageAll ? (row) => beginEditRecord('feedback', row) : null}
                 render={(row) => (
@@ -1197,7 +1204,7 @@ function AuthGate({
   const isSignup = authMode === 'signup' && !authorizedPortal;
   const authPoints = authorizedPortal
     ? [
-        { icon: ShieldCheck, copy: 'Owner-approved staff and admin accounts enter here.' },
+        { icon: ShieldCheck, copy: 'Only owner-created email/password accounts enter here.' },
         { icon: Lock, copy: 'Only labeled accounts can open the clinic-wide workspace.' },
         { icon: Users, copy: 'Approved users can review patient records for care coordination.' },
       ]
@@ -1310,7 +1317,7 @@ function AuthGate({
 
           {authorizedPortal ? (
             <p className="auth-hint">
-              This entrance accepts only owner-approved staff or admin accounts.
+              Create this user in Appwrite Auth, then add label staff, authorized, admin, or owner.
             </p>
           ) : (
             <p className="auth-hint">

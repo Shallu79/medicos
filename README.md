@@ -9,10 +9,10 @@ This version supports two secure user types.
 | User | Access |
 | --- | --- |
 | Patient/customer | Chooses `Patient`, creates an account if needed, and can read only their own patient wallet, appointments, prescriptions, medicine requests, SOS profile, and feedback. |
-| Doctor/staff/medical worker | Chooses `Authorized` or opens `/authorized`, signs in with email/password, and can read/update all patient records when their Appwrite user has the `staff` label. |
-| Admin/owner | Chooses `Authorized` or opens `/authorized`, signs in with email/password, and can read/update all records when their Appwrite user has the `admin` label. |
+| Doctor/staff/medical worker | Chooses `Authorized` or opens `/authorized`, signs in with email/password, and can read/update all patient records when their Appwrite user has the `staff` or `authorized` label. |
+| Admin/owner | Chooses `Authorized` or opens `/authorized`, signs in with email/password, and can read/update all records when their Appwrite user has the `admin` or `owner` label. |
 
-Every record created by the app stores `ownerId` and `ownerRole`. Appwrite documents/files are created with permissions for the owner plus Appwrite users labeled `staff` or `admin`. Normal patient accounts cannot open the authorized workspace, and staff/admin accounts cannot use the patient entrance.
+Every record created by the app stores `ownerId` and `ownerRole`. Patient-created rows/files are created with owner-only row permissions so patients can save without permission errors. Staff/admin access to every row comes from table-level Appwrite permissions for the `staff`, `authorized`, `admin`, or `owner` labels. Normal patient accounts cannot open the authorized workspace, and staff/admin accounts cannot use the patient entrance.
 
 ## Run locally
 
@@ -48,16 +48,20 @@ Open `http://localhost:5173/authorized` directly only for owner-created staff/ad
 
 6. For every table, add the columns listed below.
 7. For every table, enable row/document security if the console shows that option.
-8. For every table's permissions, allow authenticated users to `Create` only at the table level. Do not allow table-level `Read` for all users.
-9. Create staff/admin users manually in Appwrite Auth:
+8. For every table's permissions:
+   - allow `users` to `Create`
+   - allow label `staff` and/or `authorized` to `Read` and `Update`
+   - allow label `admin` and/or `owner` to `Read` and `Update`
+   - do not allow table-level `Read` for all `users`
+9. Create authorized users manually in Appwrite Auth:
    - normal patients can self-create accounts in the app
-   - medical workers should be created by the clinic owner/admin
-   - add label `staff` to medical worker users
-   - add label `admin` to owner/admin users
-10. Create a Storage bucket with ID `prescriptions`. Allow authenticated users to `Create` files at the bucket level. Files are created with owner, staff, and admin read/update permissions.
+   - medical workers should be created by the clinic owner/admin with email/password
+   - add label `staff` or `authorized` to medical worker users
+   - add label `admin` or `owner` to owner/admin users
+10. Create a Storage bucket with ID `prescriptions`. Allow authenticated users to `Create` files at the bucket level. If the console supports bucket/file permissions by label, give `staff`/`authorized`/`admin`/`owner` read access at bucket level; uploaded files are owner-only by default.
 11. Copy the Appwrite endpoint, project ID, database ID, collection IDs, and bucket ID into `.env`.
 
-If you already created the tables from the earlier demo setup, add `ownerId` and `ownerRole` to every table now, then remove broad table-level read permissions. Records created before this role update may need to be re-created or manually updated because old documents do not have staff/admin document permissions.
+If you already created the tables from the earlier demo setup, add `ownerId` and `ownerRole` to every table now, then remove broad table-level read permissions. Existing rows may need their permissions repaired in the Appwrite console if they were created before this owner-only permission update.
 
 ### Fix `Failed to fetch`
 
